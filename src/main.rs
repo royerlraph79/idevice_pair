@@ -695,7 +695,6 @@ impl eframe::App for MyApp {
                                     self.pairing_file_message = None;
                                     self.pairing_file_string = None;
                                     self.installed_apps = None;
-                                    self.device_info = None;
                                     self.idevice_sender
                                         .send(IdeviceCommands::InstalledApps((
                                             dev.clone(),
@@ -815,7 +814,6 @@ impl eframe::App for MyApp {
                                                     self.wireless_enabled = None;
                                                     self.dev_mode_enabled = None;
                                                     self.ddi_mounted = None;
-                                                    self.device_info = None;
 
                                                     // Send all device info requests
                                                     let dev_clone = dev.clone();
@@ -834,7 +832,6 @@ impl eframe::App for MyApp {
                                                     self.pairing_file_message = None;
                                                     self.pairing_file_string = None;
                                                     self.installed_apps = None;
-                                                    self.device_info = None;
                                                     self.idevice_sender.send(IdeviceCommands::InstalledApps((dev.clone(), self.supported_apps.keys().map(|x| x.to_owned()).collect()))).unwrap();
                                                     self.validating = false;
                                                     self.validate_res = None;
