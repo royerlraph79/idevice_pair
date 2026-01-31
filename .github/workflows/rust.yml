@@ -1,8 +1,5 @@
-# Workflow to build and upload AppImage for Linux, macOS Universal DMG, and Windows .exe
+name: Rust macOS ARM64 Build
 
-name: Rust Cross-Platform Builds
-
-# Trigger configuration
 on:
   push:
     branches: ["master"]
@@ -15,7 +12,6 @@ on:
         required: false
         default: "1.0.0"
 
-# Global environment variables
 env:
   BINARY_NAME: idevice_pair
   APP_NAME: idevice_pair
@@ -24,43 +20,17 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Linux builds
-  build-appimage:
-    name: Build & Upload AppImage (Linux ${{ matrix.arch }})
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      matrix:
-        include:
-          - arch: x86_64
-            runner: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            toolfile: appimagetool-x86_64.AppImage
-          - arch: aarch64
-            runner: ubuntu-22.04-arm
-            target: aarch64-unknown-linux-gnu
-            toolfile: appimagetool-aarch64.AppImage
-
+  macos-arm64:
+    name: Build macOS ARM64 (Apple Silicon)
+    runs-on: macos-26  # ✅ Native Apple Silicon macOS 14 (Sonoma)
     steps:
       - uses: actions/checkout@v4
 
-      # Build setup
-      - name: Setup Rust toolchain
+      - name: Set up Rust for arm64
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-          targets: ${{ matrix.target }}
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libglib2.0-dev \
-            libatk1.0-dev \
-            libgtk-3-dev \
-            pkg-config \
-            libfuse2 \
-            appstream \
-            usbmuxd
+          targets: aarch64-apple-darwin
 
       - name: Cache Cargo
         uses: actions/cache@v4
@@ -69,110 +39,32 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{matrix.target}}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: linux-cargo-
+          key: aarch64-macos-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: macos-cargo-
 
-      # Build and package
-      - name: Build binary
-        run: cargo build --release --no-default-features --bin ${{ env.BINARY_NAME }} --target ${{ matrix.target }}
-
-      - name: Download appimagetool
-        run: |
-          wget -c https://github.com/AppImage/AppImageKit/releases/download/continuous/${{ matrix.toolfile }} \
-            -O appimagetool.AppImage
-          chmod +x appimagetool.AppImage
-
-      - name: Prepare AppDir
-        run: |
-          mkdir -p AppDir/usr/bin AppDir/usr/lib AppDir/usr/share/icons/hicolor/256x256/apps AppDir/etc/udev/rules.d
-          cp target/${{ matrix.target }}/release/${{ env.BINARY_NAME }} AppDir/usr/bin/
-          cp $(which usbmuxd) AppDir/usr/bin/
-          sudo cp /lib/udev/rules.d/39-usbmuxd.rules AppDir/etc/udev/rules.d/
-          ICON_NAME=${ICON_PNG##*/}; BASENAME=${ICON_NAME%.*}
-          cp ${{ env.ICON_PNG }} AppDir/${BASENAME}.png
-          cp ${{ env.ICON_PNG }} AppDir/usr/share/icons/hicolor/256x256/apps/${BASENAME}.png
-          cat > AppDir/${{ env.BINARY_NAME }}.desktop <<EOF
-          [Desktop Entry]
-          Type=Application
-          Name=${{ env.APP_NAME }}
-          Exec=${{ env.BINARY_NAME }} %u
-          Icon=${BASENAME}
-          Categories=Utility;
-          EOF
-          ln -s usr/bin/${{ env.BINARY_NAME }} AppDir/AppRun
-          chmod +x AppDir/AppRun
-
-      - name: Build AppImage
-        run: |
-          FILENAME="${{ env.APP_NAME }}-${{ env.VERSION }}-linux-${{ matrix.arch }}.AppImage"
-          ./appimagetool.AppImage AppDir "$FILENAME"
-
-      - name: Upload AppImage
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.APP_NAME }}-${{ env.VERSION }}-linux-${{ matrix.arch }}.AppImage
-          path: ${{ env.APP_NAME }}-${{ env.VERSION }}-linux-${{ matrix.arch }}.AppImage
-
-  # macOS builds
-  macos-universal:
-    name: Build macOS slices
-    runs-on: macos-latest
-    strategy:
-      matrix:
-        include:
-          - arch: x86_64
-            target: x86_64-apple-darwin
-          - arch: arm64
-            target: aarch64-apple-darwin
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Rust for ${{ matrix.arch }}
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-          targets: ${{ matrix.target }}
-
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{matrix.target}}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: linux-cargo-
-
-      - name: Build ${{ matrix.arch }} slice
+      - name: Build arm64 binary
         run: |
           cargo build --release \
             --no-default-features \
             --bin ${{ env.BINARY_NAME }} \
-            --target ${{ matrix.target }}
+            --target aarch64-apple-darwin
 
-      - name: Upload slice ${{ matrix.arch }}
+      - name: Upload arm64 binary
         uses: actions/upload-artifact@v4
         with:
-          name: slice-${{ matrix.arch }}
-          path: target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}
+          name: slice-arm64
+          path: target/aarch64-apple-darwin/release/${{ env.BINARY_NAME }}
 
   macos-bundle:
-    name: Create, Sign, Notarize & Upload Universal DMG
-    needs: macos-universal
-    runs-on: macos-latest
+    name: Create, Sign, Notarize & Upload DMG (ARM64 only)
+    needs: macos-arm64
+    runs-on: macos-26  # ✅ Also use native runner here
     env:
       HAVE_SIGNING_SECRETS: ${{ secrets.DEV_ID_P12_BASE64 != '' && secrets.DEV_ID_P12_PASSWORD != '' && secrets.DEV_IDENTITY_NAME != '' }}
       HAVE_NOTARIZE_SECRETS: ${{ secrets.NOTARIZE_APPLE_ID != '' && secrets.NOTARIZE_APP_SPECIFIC_PASS != '' && secrets.NOTARIZE_TEAM_ID != '' }}
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download x86_64 slice
-        uses: actions/download-artifact@v4
-        with:
-          name: slice-x86_64
-          path: slice-x86_64
 
       - name: Download arm64 slice
         uses: actions/download-artifact@v4
@@ -187,17 +79,13 @@ jobs:
           p12-file-base64: ${{ secrets.DEV_ID_P12_BASE64 }}
           p12-password: ${{ secrets.DEV_ID_P12_PASSWORD }}
 
-      - name: Build & Assemble Universal .app
+      - name: Build .app for ARM64
         run: |
           APP="${{ env.APP_NAME }}.app"
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-          # 1) Merge slices
-          lipo slice-x86_64/${{ env.BINARY_NAME }} \
-               slice-arm64/${{ env.BINARY_NAME }} \
-            -create -output "$APP/Contents/MacOS/${{ env.APP_NAME }}"
+          cp slice-arm64/${{ env.BINARY_NAME }} "$APP/Contents/MacOS/${{ env.APP_NAME }}"
 
-          # 2) Write Info.plist
           cat > "$APP/Contents/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -215,14 +103,11 @@ jobs:
           </dict></plist>
           EOF
 
-          # 3) Copy icon files to Resources
-          cp icon.icns "$APP/Contents/Resources/"
-          cp Assets.car "$APP/Contents/Resources/"
-
-          # 4) Clean any stray xattrs
+          cp icon.icns "$APP/Contents/Resources/" || true
+          cp Assets.car "$APP/Contents/Resources/" || true
           xattr -rc "$APP"
 
-      - name: Code-sign with Hardened Runtime & Timestamp
+      - name: Code-sign with Hardened Runtime
         if: env.HAVE_SIGNING_SECRETS == 'true'
         run: |
           APP="${{ env.APP_NAME }}.app"
@@ -238,7 +123,7 @@ jobs:
 
       - name: Create DMG
         run: |
-          DMG="dist/${{ env.APP_NAME }}-${{ env.VERSION }}-macos-universal.dmg"
+          DMG="dist/${{ env.APP_NAME }}-${{ env.VERSION }}-macos-arm64.dmg"
           mkdir -p dist dmg-staging
           cp -R "${{ env.APP_NAME }}.app" dmg-staging/
           ln -s /Applications dmg-staging/Applications
@@ -264,38 +149,5 @@ jobs:
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.APP_NAME }}-${{ env.VERSION }}-macos-universal.dmg
-          path: dist/${{ env.APP_NAME }}-${{ env.VERSION }}-macos-universal.dmg
-
-  # Windows build
-  build-windows:
-    name: Build Windows x64
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-          targets: x86_64-pc-windows-msvc
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: windows-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: linux-cargo-
-      - name: Build and Rename Executable
-        shell: bash
-        run: |
-          cargo build --release --no-default-features --bin ${{ env.BINARY_NAME }} --target x86_64-pc-windows-msvc
-          mkdir -p release
-          cp target/x86_64-pc-windows-msvc/release/${{ env.BINARY_NAME }}.exe \
-             release/${{ env.APP_NAME }}-${{ env.VERSION }}-windows-x86_64.exe
-      - name: Upload Windows .exe
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.APP_NAME }}-${{ env.VERSION }}-windows-x86_64.exe
-          path: release/${{ env.APP_NAME }}-${{ env.VERSION }}-windows-x86_64.exe
+          name: ${{ env.APP_NAME }}-${{ env.VERSION }}-macos-arm64.dmg
+          path: dist/${{ env.APP_NAME }}-${{ env.VERSION }}-macos-arm64.dmg
